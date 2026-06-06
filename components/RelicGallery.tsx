@@ -7,7 +7,6 @@ import {
 	EffectComposer,
 	Bloom,
 	Vignette,
-	DepthOfField,
 } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import { RELICS, PALETTE, type RelicComponent } from './relics';
@@ -142,6 +141,28 @@ function CathedralArchitecture() {
 			}),
 		[]
 	);
+	const archHighlight = useMemo(
+		() =>
+			new THREE.MeshBasicMaterial({
+				color: '#c99a62',
+				transparent: true,
+				opacity: 0.11,
+				depthWrite: false,
+				blending: THREE.AdditiveBlending,
+			}),
+		[]
+	);
+	const coolEdge = useMemo(
+		() =>
+			new THREE.MeshBasicMaterial({
+				color: '#6f8396',
+				transparent: true,
+				opacity: 0.075,
+				depthWrite: false,
+				blending: THREE.AdditiveBlending,
+			}),
+		[]
+	);
 
 	useFrame((state) => {
 		const t = state.clock.elapsedTime;
@@ -194,27 +215,6 @@ function CathedralArchitecture() {
 			</mesh>
 			<pointLight position={[0, 2.9, ARCH_FAR - 2]} color="#d99a4b" intensity={28} distance={42} />
 
-			{/* high side-window light shafts */}
-			{bayDepths.slice(2, 10).map((z, i) =>
-				[-1, 1].map((side) => (
-					<mesh
-						key={`${side}-${z}`}
-						position={[side * 4.9, 3.9, z + (i % 2) * 1.6]}
-						rotation={[0.15, 0, side * -0.28]}
-					>
-						<planeGeometry args={[0.9, 6.4]} />
-						<meshBasicMaterial
-							color="#d6b37a"
-							transparent
-							opacity={0.04}
-							depthWrite={false}
-							side={THREE.DoubleSide}
-							blending={THREE.AdditiveBlending}
-						/>
-					</mesh>
-				))
-			)}
-
 			<points ref={dust} geometry={dustGeometry}>
 				<pointsMaterial
 					color="#d8b98a"
@@ -260,6 +260,12 @@ function CathedralArchitecture() {
 							position={[0, -1.95, 0]}
 							castShadow
 						/>
+						<mesh
+							geometry={archGeometry}
+							material={i % 2 === 0 ? archHighlight : coolEdge}
+							position={[0, -1.92, 0.02]}
+							scale={[0.985, 0.985, 1]}
+						/>
 						{[-1, 1].map((side) => (
 							<mesh
 								key={side}
@@ -293,6 +299,95 @@ function CathedralArchitecture() {
 					</mesh>
 				</group>
 			))}
+		</group>
+	);
+}
+
+function CathedralLightRig() {
+	const beamDepths = [-8, -18, -30, -42];
+
+	return (
+		<group>
+			{beamDepths.map((z, i) => (
+				<group key={z}>
+					<mesh
+						position={[i % 2 === 0 ? -1.15 : 1.15, 2.25, z]}
+						rotation={[0.16, 0, i % 2 === 0 ? -0.18 : 0.18]}
+					>
+						<coneGeometry args={[1.55, 8.4, 32, 1, true]} />
+						<meshBasicMaterial
+							color={i === 1 ? '#f0c58b' : '#c99558'}
+							transparent
+							opacity={i === 1 ? 0.07 : 0.045}
+							depthWrite={false}
+							side={THREE.DoubleSide}
+							blending={THREE.AdditiveBlending}
+						/>
+					</mesh>
+					<mesh position={[0, -2.325, z]} rotation={[-Math.PI / 2, 0, 0]}>
+						<circleGeometry args={[i === 1 ? 2.25 : 1.75, 56]} />
+						<meshBasicMaterial
+							color="#d59b58"
+							transparent
+							opacity={i === 1 ? 0.18 : 0.1}
+							depthWrite={false}
+							blending={THREE.AdditiveBlending}
+						/>
+					</mesh>
+				</group>
+			))}
+
+			{/* High architectural light, as if entering through clerestory openings. */}
+			<spotLight
+				position={[-5.8, 7.8, -4]}
+				target-position={[0.15, -1.15, -10]}
+				angle={0.24}
+				penumbra={0.7}
+				intensity={92}
+				distance={34}
+				color="#f2be7b"
+				castShadow
+				shadow-mapSize-width={2048}
+				shadow-mapSize-height={2048}
+				shadow-bias={-0.00035}
+			/>
+			<spotLight
+				position={[5.6, 7.4, -17]}
+				target-position={[-0.1, -1.25, -20]}
+				angle={0.22}
+				penumbra={0.72}
+				intensity={76}
+				distance={36}
+				color="#d9a05f"
+				castShadow
+				shadow-mapSize-width={1024}
+				shadow-mapSize-height={1024}
+				shadow-bias={-0.00035}
+			/>
+			<spotLight
+				position={[0, 8.6, -13]}
+				target-position={[0, -2.2, -13]}
+				angle={0.3}
+				penumbra={0.82}
+				intensity={128}
+				distance={28}
+				color="#ffd7a0"
+				castShadow
+				shadow-mapSize-width={2048}
+				shadow-mapSize-height={2048}
+				shadow-bias={-0.0003}
+			/>
+			<directionalLight
+				position={[2.5, 4.5, -46]}
+				intensity={1.65}
+				color="#7c91aa"
+			/>
+			<pointLight
+				position={[0, -0.8, -14]}
+				intensity={4.8}
+				distance={8}
+				color="#7a5330"
+			/>
 		</group>
 	);
 }
@@ -479,19 +574,20 @@ function GalleryScene({ speed = 1, zSpacing = 6 }: RelicGalleryProps) {
 	return (
 		<>
 			<color attach="background" args={['#080706']} />
-			<fogExp2 attach="fog" args={['#0a0806', 0.035]} />
+			<fogExp2 attach="fog" args={['#090706', 0.032]} />
 
 			{/* Near-black fill so the cathedral stays mostly in shadow */}
-			<ambientLight intensity={0.025} />
+			<ambientLight intensity={0.018} />
 
 			<CathedralArchitecture />
+			<CathedralLightRig />
 
-			{/* Warm key light, upper-left, raking down across the relics */}
+			{/* Low-intensity architectural fill; the beams carry the real exposure. */}
 			<spotLight
 				position={[-4.6, 6.8, -8]}
 				angle={0.36}
 				penumbra={1}
-				intensity={72}
+				intensity={16}
 				distance={34}
 				color={'#d89a54'}
 				castShadow
@@ -504,7 +600,7 @@ function GalleryScene({ speed = 1, zSpacing = 6 }: RelicGalleryProps) {
 				target-position={[0, 0.5, -18]}
 				angle={0.22}
 				penumbra={1}
-				intensity={24}
+				intensity={10}
 				distance={36}
 				color={'#c79d66'}
 			/>
@@ -512,15 +608,15 @@ function GalleryScene({ speed = 1, zSpacing = 6 }: RelicGalleryProps) {
 			{/* Cool, low rim light from back-right to catch edges */}
 			<directionalLight
 				position={[6, 3, -28]}
-				intensity={0.9}
+				intensity={1.35}
 				color={'#7b8ca0'}
 			/>
 
 			{/* Faint warm bounce to keep shadow cores from going fully black */}
 			<pointLight
 				position={[0, -3, 2]}
-				intensity={3.5}
-				distance={10}
+				intensity={2.2}
+				distance={9}
 				color={'#5a3f28'}
 			/>
 
@@ -534,17 +630,12 @@ function GalleryScene({ speed = 1, zSpacing = 6 }: RelicGalleryProps) {
 
 			<EffectComposer>
 				<Bloom
-					intensity={0.9}
-					luminanceThreshold={0.85}
-					luminanceSmoothing={0.2}
+					intensity={0.48}
+					luminanceThreshold={0.92}
+					luminanceSmoothing={0.12}
 					mipmapBlur
 				/>
-				<DepthOfField
-					focusDistance={0.015}
-					focalLength={0.05}
-					bokehScale={3}
-				/>
-				<Vignette eskil={false} offset={0.25} darkness={0.95} />
+				<Vignette eskil={false} offset={0.2} darkness={0.82} />
 			</EffectComposer>
 		</>
 	);
@@ -587,7 +678,10 @@ export default function RelicGallery({
 				gl={{
 					antialias: true,
 					toneMapping: THREE.ACESFilmicToneMapping,
-					toneMappingExposure: 0.85,
+					toneMappingExposure: 0.78,
+				}}
+				onCreated={({ gl }) => {
+					gl.shadowMap.type = THREE.PCFSoftShadowMap;
 				}}
 				dpr={[1, 2]}
 			>
