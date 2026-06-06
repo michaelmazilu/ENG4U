@@ -1,7 +1,7 @@
 'use client';
 
 import type React from 'react';
-import { useRef, useCallback, useState, useEffect, useMemo } from 'react';
+import { useRef, useCallback, useState, useEffect, useMemo, useLayoutEffect } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import {
 	EffectComposer,
@@ -49,6 +49,12 @@ type BeamConfig = {
 	color: string;
 	intensity: number;
 	angle: number;
+};
+
+type InstanceSpec = {
+	position: [number, number, number];
+	rotation?: [number, number, number];
+	scale?: [number, number, number];
 };
 
 function archCurve(width: number, wallHeight: number, crownHeight: number) {
@@ -155,6 +161,55 @@ function makeFogTexture() {
 	return texture;
 }
 
+function InstancedMeshes({
+	geometry,
+	material,
+	instances,
+	castShadow = false,
+	receiveShadow = false,
+}: {
+	geometry: THREE.BufferGeometry;
+	material: THREE.Material;
+	instances: InstanceSpec[];
+	castShadow?: boolean;
+	receiveShadow?: boolean;
+}) {
+	const ref = useRef<THREE.InstancedMesh>(null);
+
+	useLayoutEffect(() => {
+		const mesh = ref.current;
+		if (!mesh) return;
+
+		const matrix = new THREE.Matrix4();
+		const position = new THREE.Vector3();
+		const quaternion = new THREE.Quaternion();
+		const rotation = new THREE.Euler();
+		const scale = new THREE.Vector3();
+
+		instances.forEach((instance, i) => {
+			position.set(...instance.position);
+			rotation.set(...(instance.rotation ?? [0, 0, 0]));
+			quaternion.setFromEuler(rotation);
+			scale.set(...(instance.scale ?? [1, 1, 1]));
+			matrix.compose(position, quaternion, scale);
+			mesh.setMatrixAt(i, matrix);
+		});
+		mesh.instanceMatrix.needsUpdate = true;
+		mesh.computeBoundingSphere();
+	}, [instances]);
+
+	if (instances.length === 0) return null;
+
+	return (
+		<instancedMesh
+			ref={ref}
+			args={[geometry, material, instances.length]}
+			castShadow={castShadow}
+			receiveShadow={receiveShadow}
+		/>
+	);
+}
+
 function CathedralArchitecture() {
 	const nave = useRef<THREE.Group>(null);
 	const dust = useRef<THREE.Points>(null);
@@ -185,6 +240,65 @@ function CathedralArchitecture() {
 		() => new THREE.TubeGeometry(archCurve(5.8, 5.6, 8.2), 72, 0.035, 6, false),
 		[]
 	);
+	const naveInstances = useMemo(() => {
+		const mainColumns: InstanceSpec[] = [];
+		const capitals: InstanceSpec[] = [];
+		const sideColumns: InstanceSpec[] = [];
+		const stoneArches: InstanceSpec[] = [];
+		const bronzeArches: InstanceSpec[] = [];
+		const warmHighlights: InstanceSpec[] = [];
+		const coolHighlights: InstanceSpec[] = [];
+		const sideArches: InstanceSpec[] = [];
+		const ribs: InstanceSpec[] = [];
+
+		bayDepths.forEach((z, i) => {
+			[-1, 1].forEach((side) => {
+				mainColumns.push({
+					position: [side * 4.35, 1.35, z],
+				});
+				capitals.push({
+					position: [side * 4.35, 5.12, z],
+				});
+				sideColumns.push({
+					position: [side * 6.35, 0.75, z],
+					scale: [0.58, 0.78, 0.58],
+				});
+				sideArches.push({
+					position: [side * 6.1, -1.25, z],
+					scale: [1, 1, 0.8],
+				});
+			});
+
+			const arch = {
+				position: [0, -1.95, z] as [number, number, number],
+			};
+			if (i % 3 === 0) bronzeArches.push(arch);
+			else stoneArches.push(arch);
+
+			const highlight = {
+				position: [0, -1.92, z + 0.02] as [number, number, number],
+				scale: [0.985, 0.985, 1] as [number, number, number],
+			};
+			if (i % 2 === 0) warmHighlights.push(highlight);
+			else coolHighlights.push(highlight);
+
+			ribs.push({
+				position: [0, -1.05, z],
+			});
+		});
+
+		return {
+			mainColumns,
+			capitals,
+			sideColumns,
+			stoneArches,
+			bronzeArches,
+			warmHighlights,
+			coolHighlights,
+			sideArches,
+			ribs,
+		};
+	}, [bayDepths]);
 
 	const dustGeometry = useMemo(() => {
 		const count = 520;
@@ -321,63 +435,60 @@ function CathedralArchitecture() {
 			</points>
 
 			<group ref={nave}>
-				{bayDepths.map((z, i) => (
-					<group key={z} position={[0, 0, z]}>
-						{[-1, 1].map((side) => (
-							<group key={side}>
-								<mesh
-									geometry={columnGeometry}
-									material={stone}
-									position={[side * 4.35, 1.35, 0]}
-									castShadow
-									receiveShadow
-								/>
-								<mesh
-									geometry={columnCapitalGeometry}
-									material={stoneEdge}
-									position={[side * 4.35, 5.12, 0]}
-									castShadow
-								/>
-								<mesh
-									geometry={columnGeometry}
-									material={stone}
-									position={[side * 6.35, 0.75, 0]}
-									scale={[0.58, 0.78, 0.58]}
-									castShadow
-									receiveShadow
-								/>
-							</group>
-						))}
-						<mesh
-							geometry={archGeometry}
-							material={i % 3 === 0 ? bronze : stoneEdge}
-							position={[0, -1.95, 0]}
-							castShadow
-						/>
-						<mesh
-							geometry={archGeometry}
-							material={i % 2 === 0 ? archHighlight : coolEdge}
-							position={[0, -1.92, 0.02]}
-							scale={[0.985, 0.985, 1]}
-						/>
-						{[-1, 1].map((side) => (
-							<mesh
-								key={side}
-								geometry={sideArchGeometry}
-								material={stone}
-								position={[side * 6.1, -1.25, 0]}
-								scale={[1, 1, 0.8]}
-								castShadow
-							/>
-						))}
-						<mesh
-							geometry={ribGeometry}
-							material={stoneEdge}
-							position={[0, -1.05, 0]}
-							castShadow
-						/>
-					</group>
-				))}
+				<InstancedMeshes
+					geometry={columnGeometry}
+					material={stone}
+					instances={naveInstances.mainColumns}
+					castShadow
+					receiveShadow
+				/>
+				<InstancedMeshes
+					geometry={columnCapitalGeometry}
+					material={stoneEdge}
+					instances={naveInstances.capitals}
+					castShadow
+				/>
+				<InstancedMeshes
+					geometry={columnGeometry}
+					material={stone}
+					instances={naveInstances.sideColumns}
+					castShadow
+					receiveShadow
+				/>
+				<InstancedMeshes
+					geometry={archGeometry}
+					material={stoneEdge}
+					instances={naveInstances.stoneArches}
+					castShadow
+				/>
+				<InstancedMeshes
+					geometry={archGeometry}
+					material={bronze}
+					instances={naveInstances.bronzeArches}
+					castShadow
+				/>
+				<InstancedMeshes
+					geometry={archGeometry}
+					material={archHighlight}
+					instances={naveInstances.warmHighlights}
+				/>
+				<InstancedMeshes
+					geometry={archGeometry}
+					material={coolEdge}
+					instances={naveInstances.coolHighlights}
+				/>
+				<InstancedMeshes
+					geometry={sideArchGeometry}
+					material={stone}
+					instances={naveInstances.sideArches}
+					castShadow
+				/>
+				<InstancedMeshes
+					geometry={ribGeometry}
+					material={stoneEdge}
+					instances={naveInstances.ribs}
+					castShadow
+				/>
 			</group>
 
 			{/* side aisles and far silhouettes sinking into darkness */}
@@ -611,9 +722,9 @@ function CathedralLightRig() {
 					intensity={beam.intensity}
 					distance={24 + i * 3}
 					color={beam.color}
-					castShadow
-					shadow-mapSize-width={i < 2 ? 2048 : 1024}
-					shadow-mapSize-height={i < 2 ? 2048 : 1024}
+					castShadow={i < 2}
+					shadow-mapSize-width={1024}
+					shadow-mapSize-height={1024}
 					shadow-bias={-0.00035}
 				/>
 			))}
@@ -650,6 +761,8 @@ function RelicSlot({
 }) {
 	const group = useRef<THREE.Group>(null);
 	const [progress, setProgress] = useState(0);
+	const progressRef = useRef(0);
+	const opacityRef = useRef(-1);
 
 	useFrame((state) => {
 		const g = group.current;
@@ -662,12 +775,18 @@ function RelicSlot({
 
 		// progress 0 (far) -> 1 (at camera)
 		const p = THREE.MathUtils.clamp((slot.z - FAR) / (NEAR - FAR), 0, 1);
-		if (Math.abs(p - progress) > 0.01) setProgress(p);
+		if (Math.abs(p - progressRef.current) > 0.018) {
+			progressRef.current = p;
+			setProgress(p);
+		}
 
 		// opacity: fade in from far, fade out as it passes the camera
 		let opacity = 1;
 		if (p < 0.12) opacity = p / 0.12;
 		else if (p > 0.82) opacity = Math.max(0, (1 - p) / 0.18);
+
+		if (Math.abs(opacity - opacityRef.current) <= 0.015) return;
+		opacityRef.current = opacity;
 
 		g.traverse((obj) => {
 			const mesh = obj as THREE.Mesh;
@@ -702,13 +821,15 @@ function RelicSlot({
 
 	return (
 		<group ref={group} scale={0.85 * slot.scale}>
-			<pointLight
-				position={[0, 0, 0]}
-				color="#ffe8a3"
-				intensity={0.65}
-				distance={2}
-				decay={2}
-			/>
+			{progress > 0.08 && progress < 0.9 && (
+				<pointLight
+					position={[0, 0, 0]}
+					color="#ffe8a3"
+					intensity={0.65}
+					distance={2}
+					decay={2}
+				/>
+			)}
 			<Component progress={progress} />
 		</group>
 	);
@@ -855,10 +976,6 @@ function GalleryScene({ speed = 1, zSpacing = 6 }: RelicGalleryProps) {
 				intensity={22}
 				distance={34}
 				color={'#b88745'}
-				castShadow
-				shadow-mapSize-width={2048}
-				shadow-mapSize-height={2048}
-				shadow-bias={-0.0004}
 			/>
 			<spotLight
 				position={[4.8, 6.4, -20]}
@@ -948,13 +1065,17 @@ export default function RelicGallery({
 				camera={{ position: [0, 0, 0], fov: 55 }}
 				gl={{
 					antialias: true,
+					alpha: false,
+					stencil: false,
+					depth: true,
+					powerPreference: 'high-performance',
 					toneMapping: THREE.ACESFilmicToneMapping,
 					toneMappingExposure: 1.48,
 				}}
 				onCreated={({ gl }) => {
 					gl.shadowMap.type = THREE.PCFSoftShadowMap;
 				}}
-				dpr={[1, 2]}
+				dpr={[1, 1.5]}
 			>
 				<GalleryScene speed={speed} zSpacing={zSpacing} />
 			</Canvas>
