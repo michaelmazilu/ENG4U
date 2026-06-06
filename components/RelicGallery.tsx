@@ -38,6 +38,19 @@ type Slot = {
 	scale: number;
 };
 
+type BeamConfig = {
+	id: string;
+	source: [number, number, number];
+	target: [number, number, number];
+	width: number;
+	opacity: number;
+	pool: [number, number];
+	poolOpacity: number;
+	color: string;
+	intensity: number;
+	angle: number;
+};
+
 function archCurve(width: number, wallHeight: number, crownHeight: number) {
 	const points: THREE.Vector3[] = [];
 	const half = width / 2;
@@ -59,6 +72,87 @@ function archCurve(width: number, wallHeight: number, crownHeight: number) {
 		points.push(new THREE.Vector3(half, wallHeight - (i / 10) * wallHeight, 0));
 	}
 	return new THREE.CatmullRomCurve3(points);
+}
+
+function makeBeamTexture() {
+	if (typeof document === 'undefined') return null;
+
+	const canvas = document.createElement('canvas');
+	canvas.width = 96;
+	canvas.height = 384;
+	const ctx = canvas.getContext('2d');
+	if (!ctx) return null;
+
+	const image = ctx.createImageData(canvas.width, canvas.height);
+	for (let y = 0; y < canvas.height; y += 1) {
+		const v = y / (canvas.height - 1);
+		const lengthFade = Math.pow(Math.sin(v * Math.PI), 0.6);
+		for (let x = 0; x < canvas.width; x += 1) {
+			const u = Math.abs((x / (canvas.width - 1)) * 2 - 1);
+			const feather = Math.exp(-u * u * 3.9);
+			const core = Math.exp(-u * u * 18) * 0.08;
+			const dust = ((x * 17 + y * 31) % 23 === 0 ? 0.12 : 0) * feather;
+			const alpha = Math.min(255, (feather * 0.58 + core + dust) * lengthFade * 255);
+			const i = (y * canvas.width + x) * 4;
+			image.data[i] = alpha;
+			image.data[i + 1] = alpha;
+			image.data[i + 2] = alpha;
+			image.data[i + 3] = alpha;
+		}
+	}
+	ctx.putImageData(image, 0, 0);
+
+	const texture = new THREE.CanvasTexture(canvas);
+	texture.wrapS = THREE.ClampToEdgeWrapping;
+	texture.wrapT = THREE.ClampToEdgeWrapping;
+	texture.needsUpdate = true;
+	return texture;
+}
+
+function makePoolTexture() {
+	if (typeof document === 'undefined') return null;
+
+	const canvas = document.createElement('canvas');
+	canvas.width = 192;
+	canvas.height = 192;
+	const ctx = canvas.getContext('2d');
+	if (!ctx) return null;
+
+	const gradient = ctx.createRadialGradient(96, 96, 0, 96, 96, 96);
+	gradient.addColorStop(0, 'rgba(210, 210, 210, 0.74)');
+	gradient.addColorStop(0.42, 'rgba(70, 70, 70, 0.25)');
+	gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+	ctx.fillStyle = gradient;
+	ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+	const texture = new THREE.CanvasTexture(canvas);
+	texture.wrapS = THREE.ClampToEdgeWrapping;
+	texture.wrapT = THREE.ClampToEdgeWrapping;
+	texture.needsUpdate = true;
+	return texture;
+}
+
+function makeFogTexture() {
+	if (typeof document === 'undefined') return null;
+
+	const canvas = document.createElement('canvas');
+	canvas.width = 256;
+	canvas.height = 256;
+	const ctx = canvas.getContext('2d');
+	if (!ctx) return null;
+
+	const gradient = ctx.createRadialGradient(128, 128, 12, 128, 128, 128);
+	gradient.addColorStop(0, 'rgba(180, 180, 180, 0.5)');
+	gradient.addColorStop(0.48, 'rgba(92, 92, 92, 0.22)');
+	gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+	ctx.fillStyle = gradient;
+	ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+	const texture = new THREE.CanvasTexture(canvas);
+	texture.wrapS = THREE.ClampToEdgeWrapping;
+	texture.wrapT = THREE.ClampToEdgeWrapping;
+	texture.needsUpdate = true;
+	return texture;
 }
 
 function CathedralArchitecture() {
@@ -126,9 +220,9 @@ function CathedralArchitecture() {
 	const floorMaterial = useMemo(
 		() =>
 			new THREE.MeshStandardMaterial({
-				color: '#0d0c0b',
-				roughness: 0.72,
-				metalness: 0.22,
+				color: '#030302',
+				roughness: 0.82,
+				metalness: 0.16,
 			}),
 		[]
 	);
@@ -190,7 +284,7 @@ function CathedralArchitecture() {
 					rotation={[-Math.PI / 2, 0, 0]}
 				>
 					<planeGeometry args={[0.035, 92]} />
-					<meshBasicMaterial color="#d19a53" transparent opacity={0.055} />
+					<meshBasicMaterial color="#b88745" transparent opacity={0.032} />
 				</mesh>
 			))}
 
@@ -220,7 +314,7 @@ function CathedralArchitecture() {
 					color="#d8b98a"
 					size={0.018}
 					transparent
-					opacity={0.24}
+					opacity={0.16}
 					sizeAttenuation
 					depthWrite={false}
 				/>
@@ -303,88 +397,239 @@ function CathedralArchitecture() {
 	);
 }
 
-function CathedralLightRig() {
-	const beamDepths = [-8, -18, -30, -42];
+function GlobalCathedralFog() {
+	const mist = useRef<THREE.Points>(null);
+	const fogTexture = useMemo(() => makeFogTexture(), []);
+	const mistGeometry = useMemo(() => {
+		const count = 1500;
+		const positions = new Float32Array(count * 3);
+		for (let i = 0; i < count; i += 1) {
+			const depth = Math.random();
+			positions[i * 3] = (Math.random() - 0.5) * 13.5;
+			positions[i * 3 + 1] = -1.7 + Math.random() * 8.2;
+			positions[i * 3 + 2] = -14 - depth * depth * 62;
+		}
+		const geometry = new THREE.BufferGeometry();
+		geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+		return geometry;
+	}, []);
+
+	useFrame((state) => {
+		if (!mist.current) return;
+		mist.current.position.x = Math.sin(state.clock.elapsedTime * 0.08) * 0.18;
+		mist.current.position.y = Math.cos(state.clock.elapsedTime * 0.06) * 0.08;
+	});
+
+	return (
+		<points ref={mist} geometry={mistGeometry}>
+			<pointsMaterial
+				color="#9f876b"
+				alphaMap={fogTexture ?? undefined}
+				size={0.34}
+				transparent
+				opacity={0.022}
+				sizeAttenuation
+				depthWrite={false}
+				depthTest
+				blending={THREE.AdditiveBlending}
+			/>
+		</points>
+	);
+}
+
+function VolumetricBeam({
+	beam,
+	beamTexture,
+	poolTexture,
+}: {
+	beam: BeamConfig;
+	beamTexture: THREE.Texture | null;
+	poolTexture: THREE.Texture | null;
+}) {
+	const { position, quaternion, length, dustGeometry } = useMemo(() => {
+		const source = new THREE.Vector3(...beam.source);
+		const target = new THREE.Vector3(...beam.target);
+		const direction = target.clone().sub(source);
+		const beamLength = direction.length();
+		const q = new THREE.Quaternion().setFromUnitVectors(
+			new THREE.Vector3(0, 1, 0),
+			direction.clone().normalize()
+		);
+		const positions = new Float32Array(28 * 3);
+		const side = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
+		const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+		for (let i = 0; i < 28; i += 1) {
+			const t = (i + 0.5) / 28;
+			const center = source.clone().lerp(target, t);
+			const radius = beam.width * (0.16 + Math.sin(t * Math.PI) * 0.34);
+			center.add(side.clone().multiplyScalar((Math.random() - 0.5) * radius));
+			center.add(normal.clone().multiplyScalar((Math.random() - 0.5) * radius));
+			positions[i * 3] = center.x;
+			positions[i * 3 + 1] = center.y;
+			positions[i * 3 + 2] = center.z;
+		}
+		const geometry = new THREE.BufferGeometry();
+		geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+		return {
+			position: source.clone().lerp(target, 0.5),
+			quaternion: q,
+			length: beamLength,
+			dustGeometry: geometry,
+		};
+	}, [beam]);
 
 	return (
 		<group>
-			{beamDepths.map((z, i) => (
-				<group key={z}>
-					<mesh
-						position={[i % 2 === 0 ? -1.15 : 1.15, 2.25, z]}
-						rotation={[0.16, 0, i % 2 === 0 ? -0.18 : 0.18]}
-					>
-						<coneGeometry args={[1.55, 8.4, 32, 1, true]} />
-						<meshBasicMaterial
-							color={i === 1 ? '#f0c58b' : '#c99558'}
+			{beam.opacity > 0.005 && (
+				<>
+					<group position={position} quaternion={quaternion}>
+						{[0, Math.PI / 2].map((rotation) => (
+							<mesh key={rotation} rotation={[0, rotation, 0]}>
+								<planeGeometry args={[beam.width, length]} />
+								<meshBasicMaterial
+									color={beam.color}
+									alphaMap={beamTexture ?? undefined}
+									transparent
+									opacity={beam.opacity}
+									depthWrite={false}
+									depthTest
+									side={THREE.DoubleSide}
+									blending={THREE.AdditiveBlending}
+								/>
+							</mesh>
+						))}
+					</group>
+					<points geometry={dustGeometry}>
+						<pointsMaterial
+							color="#d9b47b"
+							size={0.025}
 							transparent
-							opacity={i === 1 ? 0.07 : 0.045}
+							opacity={0.12}
+							sizeAttenuation
 							depthWrite={false}
-							side={THREE.DoubleSide}
 							blending={THREE.AdditiveBlending}
 						/>
-					</mesh>
-					<mesh position={[0, -2.325, z]} rotation={[-Math.PI / 2, 0, 0]}>
-						<circleGeometry args={[i === 1 ? 2.25 : 1.75, 56]} />
-						<meshBasicMaterial
-							color="#d59b58"
-							transparent
-							opacity={i === 1 ? 0.18 : 0.1}
-							depthWrite={false}
-							blending={THREE.AdditiveBlending}
-						/>
-					</mesh>
-				</group>
+					</points>
+				</>
+			)}
+			<mesh
+				position={[beam.target[0], -2.322, beam.target[2]]}
+				rotation={[-Math.PI / 2, 0, beam.target[0] * 0.12]}
+				scale={[beam.pool[0], beam.pool[1], 1]}
+			>
+				<planeGeometry args={[1, 1]} />
+				<meshBasicMaterial
+					color={beam.color}
+					alphaMap={poolTexture ?? undefined}
+					transparent
+					opacity={beam.poolOpacity}
+					depthWrite={false}
+					blending={THREE.AdditiveBlending}
+				/>
+			</mesh>
+		</group>
+	);
+}
+
+function CathedralLightRig() {
+	const beamTexture = useMemo(() => makeBeamTexture(), []);
+	const poolTexture = useMemo(() => makePoolTexture(), []);
+	const beams = useMemo<BeamConfig[]>(
+		() => [
+			{
+				id: 'near-left',
+				source: [-5.9, 7.95, -5.5],
+				target: [-0.55, -2.18, -10.5],
+				width: 0.68,
+				opacity: 0.032,
+				pool: [1.75, 0.85],
+				poolOpacity: 0.09,
+				color: '#b88745',
+				intensity: 12,
+				angle: 0.09,
+			},
+			{
+				id: 'center-high',
+				source: [1.25, 8.55, -14],
+				target: [0.18, -2.2, -16.5],
+				width: 0.72,
+				opacity: 0,
+				pool: [1.35, 0.72],
+				poolOpacity: 0.076,
+				color: '#c79a5a',
+				intensity: 10,
+				angle: 0.085,
+			},
+			{
+				id: 'right-mid',
+				source: [5.7, 7.65, -23.5],
+				target: [0.72, -2.2, -25.5],
+				width: 0.6,
+				opacity: 0.024,
+				pool: [1.55, 0.78],
+				poolOpacity: 0.068,
+				color: '#b88745',
+				intensity: 9,
+				angle: 0.09,
+			},
+			{
+				id: 'far-left',
+				source: [-5.4, 7.5, -38.5],
+				target: [-0.38, -2.2, -42],
+				width: 0.5,
+				opacity: 0.02,
+				pool: [1.2, 0.58],
+				poolOpacity: 0.052,
+				color: '#c79a5a',
+				intensity: 7,
+				angle: 0.08,
+			},
+		],
+		[]
+	);
+
+	return (
+		<group>
+			{beams.map((beam) => (
+				<VolumetricBeam
+					key={beam.id}
+					beam={beam}
+					beamTexture={beamTexture}
+					poolTexture={poolTexture}
+				/>
 			))}
 
 			{/* High architectural light, as if entering through clerestory openings. */}
-			<spotLight
-				position={[-5.8, 7.8, -4]}
-				target-position={[0.15, -1.15, -10]}
-				angle={0.24}
-				penumbra={0.7}
-				intensity={92}
-				distance={34}
-				color="#f2be7b"
-				castShadow
-				shadow-mapSize-width={2048}
-				shadow-mapSize-height={2048}
-				shadow-bias={-0.00035}
-			/>
-			<spotLight
-				position={[5.6, 7.4, -17]}
-				target-position={[-0.1, -1.25, -20]}
-				angle={0.22}
-				penumbra={0.72}
-				intensity={76}
-				distance={36}
-				color="#d9a05f"
-				castShadow
-				shadow-mapSize-width={1024}
-				shadow-mapSize-height={1024}
-				shadow-bias={-0.00035}
-			/>
-			<spotLight
-				position={[0, 8.6, -13]}
-				target-position={[0, -2.2, -13]}
-				angle={0.3}
-				penumbra={0.82}
-				intensity={128}
-				distance={28}
-				color="#ffd7a0"
-				castShadow
-				shadow-mapSize-width={2048}
-				shadow-mapSize-height={2048}
-				shadow-bias={-0.0003}
+			{beams.map((beam, i) => (
+				<spotLight
+					key={`${beam.id}-spot`}
+					position={beam.source}
+					target-position={beam.target}
+					angle={beam.angle}
+					penumbra={0.86}
+					intensity={beam.intensity}
+					distance={24 + i * 3}
+					color={beam.color}
+					castShadow
+					shadow-mapSize-width={i < 2 ? 2048 : 1024}
+					shadow-mapSize-height={i < 2 ? 2048 : 1024}
+					shadow-bias={-0.00035}
+				/>
+			))}
+			<directionalLight
+				position={[-5.5, 3.8, -34]}
+				intensity={0.28}
+				color="#7c91aa"
 			/>
 			<directionalLight
-				position={[2.5, 4.5, -46]}
-				intensity={1.65}
-				color="#7c91aa"
+				position={[5.2, 2.6, -18]}
+				intensity={0.24}
+				color="#5f748c"
 			/>
 			<pointLight
 				position={[0, -0.8, -14]}
-				intensity={4.8}
+				intensity={0.8}
 				distance={8}
 				color="#7a5330"
 			/>
@@ -431,7 +676,10 @@ function RelicSlot({
 				? mesh.material
 				: [mesh.material];
 			mats.forEach((m) => {
-				const mat = m as THREE.Material & { _baseOpacity?: number };
+				const mat = m as THREE.Material & {
+					_baseOpacity?: number;
+					_baseEmissive?: THREE.Color;
+				};
 				if (mat._baseOpacity === undefined) {
 					mat._baseOpacity = (mat as any).opacity ?? 1;
 				}
@@ -439,12 +687,28 @@ function RelicSlot({
 				mat.transparent = true;
 				(mat as any).opacity = baseOpacity * opacity;
 				mat.depthWrite = opacity > 0.85;
+
+				const emissive = (mat as any).emissive;
+				if (emissive instanceof THREE.Color) {
+					if (!mat._baseEmissive) mat._baseEmissive = emissive.clone();
+					if (mat._baseEmissive.getHex() === 0x000000) {
+						emissive.set('#ffe8a3');
+						(mat as any).emissiveIntensity = 0.028;
+					}
+				}
 			});
 		});
 	});
 
 	return (
 		<group ref={group} scale={0.85 * slot.scale}>
+			<pointLight
+				position={[0, 0, 0]}
+				color="#ffe8a3"
+				intensity={0.65}
+				distance={2}
+				decay={2}
+			/>
 			<Component progress={progress} />
 		</group>
 	);
@@ -574,12 +838,13 @@ function GalleryScene({ speed = 1, zSpacing = 6 }: RelicGalleryProps) {
 	return (
 		<>
 			<color attach="background" args={['#080706']} />
-			<fogExp2 attach="fog" args={['#090706', 0.032]} />
+			<fogExp2 attach="fog" args={['#211c17', 0.038]} />
 
 			{/* Near-black fill so the cathedral stays mostly in shadow */}
-			<ambientLight intensity={0.018} />
+			<ambientLight intensity={0.12} />
 
 			<CathedralArchitecture />
+			<GlobalCathedralFog />
 			<CathedralLightRig />
 
 			{/* Low-intensity architectural fill; the beams carry the real exposure. */}
@@ -587,9 +852,9 @@ function GalleryScene({ speed = 1, zSpacing = 6 }: RelicGalleryProps) {
 				position={[-4.6, 6.8, -8]}
 				angle={0.36}
 				penumbra={1}
-				intensity={16}
+				intensity={22}
 				distance={34}
-				color={'#d89a54'}
+				color={'#b88745'}
 				castShadow
 				shadow-mapSize-width={2048}
 				shadow-mapSize-height={2048}
@@ -600,7 +865,7 @@ function GalleryScene({ speed = 1, zSpacing = 6 }: RelicGalleryProps) {
 				target-position={[0, 0.5, -18]}
 				angle={0.22}
 				penumbra={1}
-				intensity={10}
+				intensity={14}
 				distance={36}
 				color={'#c79d66'}
 			/>
@@ -608,16 +873,22 @@ function GalleryScene({ speed = 1, zSpacing = 6 }: RelicGalleryProps) {
 			{/* Cool, low rim light from back-right to catch edges */}
 			<directionalLight
 				position={[6, 3, -28]}
-				intensity={1.35}
+				intensity={1.65}
 				color={'#7b8ca0'}
 			/>
 
 			{/* Faint warm bounce to keep shadow cores from going fully black */}
 			<pointLight
 				position={[0, -3, 2]}
-				intensity={2.2}
+				intensity={3.6}
 				distance={9}
 				color={'#5a3f28'}
+			/>
+			<pointLight
+				position={[0, 1.2, -18]}
+				intensity={5.5}
+				distance={38}
+				color={'#6d5136'}
 			/>
 
 			{slots.current.map((slot) => (
@@ -630,12 +901,12 @@ function GalleryScene({ speed = 1, zSpacing = 6 }: RelicGalleryProps) {
 
 			<EffectComposer>
 				<Bloom
-					intensity={0.48}
-					luminanceThreshold={0.92}
-					luminanceSmoothing={0.12}
+					intensity={0.28}
+					luminanceThreshold={1.05}
+					luminanceSmoothing={0.08}
 					mipmapBlur
 				/>
-				<Vignette eskil={false} offset={0.2} darkness={0.82} />
+				<Vignette eskil={false} offset={0.15} darkness={0.58} />
 			</EffectComposer>
 		</>
 	);
@@ -678,7 +949,7 @@ export default function RelicGallery({
 				gl={{
 					antialias: true,
 					toneMapping: THREE.ACESFilmicToneMapping,
-					toneMappingExposure: 0.78,
+					toneMappingExposure: 1.48,
 				}}
 				onCreated={({ gl }) => {
 					gl.shadowMap.type = THREE.PCFSoftShadowMap;
