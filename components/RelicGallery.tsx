@@ -23,6 +23,9 @@ interface RelicGalleryProps {
 
 const FAR = -42; // spawn depth
 const NEAR = 6; // past-camera cull depth
+const ARCH_FAR = -78;
+const ARCH_NEAR = 12;
+const BAY_SPACING = 8;
 
 type Slot = {
 	id: number;
@@ -35,6 +38,264 @@ type Slot = {
 	wobblePhase: number;
 	scale: number;
 };
+
+function archCurve(width: number, wallHeight: number, crownHeight: number) {
+	const points: THREE.Vector3[] = [];
+	const half = width / 2;
+	const radius = half;
+	for (let i = 0; i <= 10; i += 1) {
+		points.push(new THREE.Vector3(-half, (i / 10) * wallHeight, 0));
+	}
+	for (let i = 0; i <= 32; i += 1) {
+		const angle = Math.PI - (i / 32) * Math.PI;
+		points.push(
+			new THREE.Vector3(
+				Math.cos(angle) * radius,
+				wallHeight + Math.sin(angle) * (crownHeight - wallHeight),
+				0
+			)
+		);
+	}
+	for (let i = 0; i <= 10; i += 1) {
+		points.push(new THREE.Vector3(half, wallHeight - (i / 10) * wallHeight, 0));
+	}
+	return new THREE.CatmullRomCurve3(points);
+}
+
+function CathedralArchitecture() {
+	const nave = useRef<THREE.Group>(null);
+	const dust = useRef<THREE.Points>(null);
+
+	const bayDepths = useMemo(
+		() =>
+			Array.from(
+				{ length: Math.ceil((ARCH_NEAR - ARCH_FAR) / BAY_SPACING) + 3 },
+				(_, i) => ARCH_FAR + i * BAY_SPACING
+			),
+		[]
+	);
+
+	const columnGeometry = useMemo(() => new THREE.CylinderGeometry(0.32, 0.44, 7.4, 18), []);
+	const columnCapitalGeometry = useMemo(
+		() => new THREE.CylinderGeometry(0.56, 0.48, 0.28, 18),
+		[]
+	);
+	const archGeometry = useMemo(
+		() => new THREE.TubeGeometry(archCurve(8.6, 4.4, 7.35), 80, 0.1, 10, false),
+		[]
+	);
+	const sideArchGeometry = useMemo(
+		() => new THREE.TubeGeometry(archCurve(3.4, 3.25, 5.25), 64, 0.06, 8, false),
+		[]
+	);
+	const ribGeometry = useMemo(
+		() => new THREE.TubeGeometry(archCurve(5.8, 5.6, 8.2), 72, 0.035, 6, false),
+		[]
+	);
+
+	const dustGeometry = useMemo(() => {
+		const count = 520;
+		const positions = new Float32Array(count * 3);
+		for (let i = 0; i < count; i += 1) {
+			positions[i * 3] = (Math.random() - 0.5) * 13;
+			positions[i * 3 + 1] = 0.6 + Math.random() * 7.4;
+			positions[i * 3 + 2] = ARCH_FAR + Math.random() * (ARCH_NEAR - ARCH_FAR);
+		}
+		const geometry = new THREE.BufferGeometry();
+		geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+		return geometry;
+	}, []);
+
+	const stone = useMemo(
+		() =>
+			new THREE.MeshStandardMaterial({
+				color: '#171411',
+				roughness: 0.86,
+				metalness: 0.04,
+			}),
+		[]
+	);
+	const stoneEdge = useMemo(
+		() =>
+			new THREE.MeshStandardMaterial({
+				color: '#2b261f',
+				roughness: 0.82,
+				metalness: 0.08,
+			}),
+		[]
+	);
+	const floorMaterial = useMemo(
+		() =>
+			new THREE.MeshStandardMaterial({
+				color: '#0d0c0b',
+				roughness: 0.72,
+				metalness: 0.22,
+			}),
+		[]
+	);
+	const bronze = useMemo(
+		() =>
+			new THREE.MeshStandardMaterial({
+				color: '#5a462c',
+				roughness: 0.66,
+				metalness: 0.55,
+			}),
+		[]
+	);
+
+	useFrame((state) => {
+		const t = state.clock.elapsedTime;
+		if (nave.current) {
+			nave.current.position.z = (t * 0.18) % BAY_SPACING;
+		}
+		if (dust.current) {
+			dust.current.rotation.y = Math.sin(t * 0.08) * 0.025;
+			dust.current.position.z = (t * 0.08) % BAY_SPACING;
+		}
+	});
+
+	return (
+		<group>
+			<mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -2.35, -31]} receiveShadow>
+				<planeGeometry args={[18, 112]} />
+				<primitive object={floorMaterial} attach="material" />
+			</mesh>
+
+			{/* soft reflected nave guide lines on the polished black stone */}
+			{[-2.7, 2.7].map((x) => (
+				<mesh
+					key={x}
+					position={[x, -2.335, -30]}
+					rotation={[-Math.PI / 2, 0, 0]}
+				>
+					<planeGeometry args={[0.035, 92]} />
+					<meshBasicMaterial color="#d19a53" transparent opacity={0.055} />
+				</mesh>
+			))}
+
+			<mesh position={[0, 5.55, -33]} rotation={[Math.PI / 2, 0, 0]}>
+				<cylinderGeometry args={[6.9, 6.9, 112, 32, 1, true, 0, Math.PI]} />
+				<meshStandardMaterial
+					color="#11100f"
+					roughness={0.9}
+					metalness={0.05}
+					side={THREE.BackSide}
+				/>
+			</mesh>
+
+			{/* distant abstract oculus / altar glow */}
+			<mesh position={[0, 2.5, ARCH_FAR - 4]}>
+				<circleGeometry args={[3.8, 80]} />
+				<meshBasicMaterial color="#d19045" transparent opacity={0.18} />
+			</mesh>
+			<mesh position={[0, 2.5, ARCH_FAR - 3.95]}>
+				<ringGeometry args={[1.55, 2.0, 80]} />
+				<meshBasicMaterial color="#f0c07a" transparent opacity={0.22} />
+			</mesh>
+			<pointLight position={[0, 2.9, ARCH_FAR - 2]} color="#d99a4b" intensity={28} distance={42} />
+
+			{/* high side-window light shafts */}
+			{bayDepths.slice(2, 10).map((z, i) =>
+				[-1, 1].map((side) => (
+					<mesh
+						key={`${side}-${z}`}
+						position={[side * 4.9, 3.9, z + (i % 2) * 1.6]}
+						rotation={[0.15, 0, side * -0.28]}
+					>
+						<planeGeometry args={[0.9, 6.4]} />
+						<meshBasicMaterial
+							color="#d6b37a"
+							transparent
+							opacity={0.04}
+							depthWrite={false}
+							side={THREE.DoubleSide}
+							blending={THREE.AdditiveBlending}
+						/>
+					</mesh>
+				))
+			)}
+
+			<points ref={dust} geometry={dustGeometry}>
+				<pointsMaterial
+					color="#d8b98a"
+					size={0.018}
+					transparent
+					opacity={0.24}
+					sizeAttenuation
+					depthWrite={false}
+				/>
+			</points>
+
+			<group ref={nave}>
+				{bayDepths.map((z, i) => (
+					<group key={z} position={[0, 0, z]}>
+						{[-1, 1].map((side) => (
+							<group key={side}>
+								<mesh
+									geometry={columnGeometry}
+									material={stone}
+									position={[side * 4.35, 1.35, 0]}
+									castShadow
+									receiveShadow
+								/>
+								<mesh
+									geometry={columnCapitalGeometry}
+									material={stoneEdge}
+									position={[side * 4.35, 5.12, 0]}
+									castShadow
+								/>
+								<mesh
+									geometry={columnGeometry}
+									material={stone}
+									position={[side * 6.35, 0.75, 0]}
+									scale={[0.58, 0.78, 0.58]}
+									castShadow
+									receiveShadow
+								/>
+							</group>
+						))}
+						<mesh
+							geometry={archGeometry}
+							material={i % 3 === 0 ? bronze : stoneEdge}
+							position={[0, -1.95, 0]}
+							castShadow
+						/>
+						{[-1, 1].map((side) => (
+							<mesh
+								key={side}
+								geometry={sideArchGeometry}
+								material={stone}
+								position={[side * 6.1, -1.25, 0]}
+								scale={[1, 1, 0.8]}
+								castShadow
+							/>
+						))}
+						<mesh
+							geometry={ribGeometry}
+							material={stoneEdge}
+							position={[0, -1.05, 0]}
+							castShadow
+						/>
+					</group>
+				))}
+			</group>
+
+			{/* side aisles and far silhouettes sinking into darkness */}
+			{[-1, 1].map((side) => (
+				<group key={side}>
+					<mesh position={[side * 8.2, 0.9, -30]} rotation={[0, 0, side * 0.08]}>
+						<boxGeometry args={[2.8, 7.4, 94]} />
+						<meshStandardMaterial color="#090807" roughness={0.9} metalness={0.02} />
+					</mesh>
+					<mesh position={[side * 5.75, 5.9, -34]} rotation={[0, 0, side * 0.34]}>
+						<boxGeometry args={[0.06, 1.2, 96]} />
+						<primitive object={stoneEdge} attach="material" />
+					</mesh>
+				</group>
+			))}
+		</group>
+	);
+}
 
 /**
  * One relic instance: positions itself, fades in/out via opacity, and
@@ -217,38 +478,49 @@ function GalleryScene({ speed = 1, zSpacing = 6 }: RelicGalleryProps) {
 
 	return (
 		<>
-			<color attach="background" args={[PALETTE.charcoal]} />
-			<fog attach="fog" args={['#0a0908', 6, 30]} />
+			<color attach="background" args={['#080706']} />
+			<fogExp2 attach="fog" args={['#0a0806', 0.035]} />
 
-			{/* Near-black fill so the void is never globally lit */}
-			<ambientLight intensity={0.05} />
+			{/* Near-black fill so the cathedral stays mostly in shadow */}
+			<ambientLight intensity={0.025} />
+
+			<CathedralArchitecture />
 
 			{/* Warm key light, upper-left, raking down across the relics */}
 			<spotLight
-				position={[-6, 8, 4]}
-				angle={0.5}
+				position={[-4.6, 6.8, -8]}
+				angle={0.36}
 				penumbra={1}
-				intensity={120}
-				distance={40}
-				color={'#ffd9a0'}
+				intensity={72}
+				distance={34}
+				color={'#d89a54'}
 				castShadow
 				shadow-mapSize-width={2048}
 				shadow-mapSize-height={2048}
 				shadow-bias={-0.0004}
 			/>
+			<spotLight
+				position={[4.8, 6.4, -20]}
+				target-position={[0, 0.5, -18]}
+				angle={0.22}
+				penumbra={1}
+				intensity={24}
+				distance={36}
+				color={'#c79d66'}
+			/>
 
 			{/* Cool, low rim light from back-right to catch edges */}
 			<directionalLight
-				position={[7, 2, -6]}
-				intensity={0.5}
-				color={'#7d93ad'}
+				position={[6, 3, -28]}
+				intensity={0.9}
+				color={'#7b8ca0'}
 			/>
 
 			{/* Faint warm bounce to keep shadow cores from going fully black */}
 			<pointLight
 				position={[0, -3, 2]}
-				intensity={6}
-				distance={14}
+				intensity={3.5}
+				distance={10}
 				color={'#5a3f28'}
 			/>
 
