@@ -31,6 +31,8 @@ type Slot = {
 	x: number;
 	y: number;
 	spin: number;
+	spinSpeed: number;
+	wobblePhase: number;
 	scale: number;
 };
 
@@ -48,11 +50,14 @@ function RelicSlot({
 	const group = useRef<THREE.Group>(null);
 	const [progress, setProgress] = useState(0);
 
-	useFrame(() => {
+	useFrame((state) => {
 		const g = group.current;
 		if (!g) return;
+		const t = state.clock.elapsedTime;
 		g.position.set(slot.x, slot.y, slot.z);
-		g.rotation.y = slot.spin;
+		g.rotation.x = Math.sin(t * 0.45 + slot.wobblePhase) * 0.06;
+		g.rotation.y = slot.spin + t * slot.spinSpeed;
+		g.rotation.z = Math.cos(t * 0.38 + slot.wobblePhase) * 0.045;
 
 		// progress 0 (far) -> 1 (at camera)
 		const p = THREE.MathUtils.clamp((slot.z - FAR) / (NEAR - FAR), 0, 1);
@@ -109,6 +114,8 @@ function GalleryScene({ speed = 1, zSpacing = 6 }: RelicGalleryProps) {
 					x: Math.sin(ha) * 2.1,
 					y: Math.cos(va) * 1.4,
 					spin: (i / count) * Math.PI * 2,
+					spinSpeed: 0.12 + (i % 5) * 0.035,
+					wobblePhase: i * 1.37,
 					scale,
 				};
 			}),
@@ -123,6 +130,8 @@ function GalleryScene({ speed = 1, zSpacing = 6 }: RelicGalleryProps) {
 			x: offsets[i].x,
 			y: offsets[i].y,
 			spin: offsets[i].spin,
+			spinSpeed: offsets[i].spinSpeed,
+			wobblePhase: offsets[i].wobblePhase,
 			scale: offsets[i].scale,
 		}))
 	);
