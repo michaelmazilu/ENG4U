@@ -16,9 +16,9 @@ const instrumentSerif = Instrument_Serif({
 });
 
 export const metadata: Metadata = {
-	title: 'Relics — A Procession of Sacred Forms',
+	title: 'Artifacts — A Cathedral Procession',
 	description:
-		'An infinite 3D procession of idols, offerings, vessels, and fragments of worship drifting through darkness.',
+		'A dark cinematic cathedral procession of five symbolic artifacts moving through light, fog, and shadow.',
 	generator: 'v0.app',
 };
 

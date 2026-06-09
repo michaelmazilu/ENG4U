@@ -6,37 +6,32 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import {
 	EffectComposer,
 	Bloom,
+	Noise,
 	Vignette,
 } from '@react-three/postprocessing';
 import * as THREE from 'three';
-import { RELICS, PALETTE, type RelicComponent } from './relics';
+import FinalArtifacts, {
+	ARTIFACTS,
+	type ArtifactMeta,
+	type ProcessionSlot,
+} from './FinalArtifacts';
 
 interface RelicGalleryProps {
 	/** Speed multiplier applied to motion (default: 1) */
 	speed?: number;
-	/** Spacing between relics along Z in world units (default: 6) */
+	/** Spacing between artifacts along Z in world units (default: 6) */
 	zSpacing?: number;
 	className?: string;
 	style?: React.CSSProperties;
 }
 
-const FAR = -42; // spawn depth
-const NEAR = 6; // past-camera cull depth
+const FAR = -100; // procession reset depth
+const NEAR = 8; // past-camera cull depth
 const ARCH_FAR = -78;
 const ARCH_NEAR = 12;
 const BAY_SPACING = 8;
 
-type Slot = {
-	id: number;
-	relicIndex: number;
-	z: number;
-	x: number;
-	y: number;
-	spin: number;
-	spinSpeed: number;
-	wobblePhase: number;
-	scale: number;
-};
+type Slot = ProcessionSlot;
 
 type BeamConfig = {
 	id: string;
@@ -748,116 +743,76 @@ function CathedralLightRig() {
 	);
 }
 
-/**
- * One relic instance: positions itself, fades in/out via opacity, and
- * reports its normalized progress to the relic for approach-driven effects.
- */
-function RelicSlot({
-	slot,
-	Component,
+function CaptionPanel({
+	selected,
+	onClose,
 }: {
-	slot: Slot;
-	Component: RelicComponent;
+	selected: ArtifactMeta | null;
+	onClose: () => void;
 }) {
-	const group = useRef<THREE.Group>(null);
-	const [progress, setProgress] = useState(0);
-	const progressRef = useRef(0);
-	const opacityRef = useRef(-1);
-
-	useFrame((state) => {
-		const g = group.current;
-		if (!g) return;
-		const t = state.clock.elapsedTime;
-		g.position.set(slot.x, slot.y, slot.z);
-		g.rotation.x = Math.sin(t * 0.45 + slot.wobblePhase) * 0.06;
-		g.rotation.y = slot.spin + t * slot.spinSpeed;
-		g.rotation.z = Math.cos(t * 0.38 + slot.wobblePhase) * 0.045;
-
-		// progress 0 (far) -> 1 (at camera)
-		const p = THREE.MathUtils.clamp((slot.z - FAR) / (NEAR - FAR), 0, 1);
-		if (Math.abs(p - progressRef.current) > 0.018) {
-			progressRef.current = p;
-			setProgress(p);
-		}
-
-		// opacity: fade in from far, fade out as it passes the camera
-		let opacity = 1;
-		if (p < 0.12) opacity = p / 0.12;
-		else if (p > 0.82) opacity = Math.max(0, (1 - p) / 0.18);
-
-		if (Math.abs(opacity - opacityRef.current) <= 0.015) return;
-		opacityRef.current = opacity;
-
-		g.traverse((obj) => {
-			const mesh = obj as THREE.Mesh;
-			if (!mesh.isMesh) return;
-			const mats = Array.isArray(mesh.material)
-				? mesh.material
-				: [mesh.material];
-			mats.forEach((m) => {
-				const mat = m as THREE.Material & {
-					_baseOpacity?: number;
-					_baseEmissive?: THREE.Color;
-				};
-				if (mat._baseOpacity === undefined) {
-					mat._baseOpacity = (mat as any).opacity ?? 1;
-				}
-				const baseOpacity = mat._baseOpacity ?? 1;
-				mat.transparent = true;
-				(mat as any).opacity = baseOpacity * opacity;
-				mat.depthWrite = opacity > 0.85;
-
-				const emissive = (mat as any).emissive;
-				if (emissive instanceof THREE.Color) {
-					if (!mat._baseEmissive) mat._baseEmissive = emissive.clone();
-					if (mat._baseEmissive.getHex() === 0x000000) {
-						emissive.set('#ffe8a3');
-						(mat as any).emissiveIntensity = 0.028;
-					}
-				}
-			});
-		});
-	});
+	if (!selected) return null;
 
 	return (
-		<group ref={group} scale={0.85 * slot.scale}>
-			{progress > 0.08 && progress < 0.9 && (
-				<pointLight
-					position={[0, 0, 0]}
-					color="#ffe8a3"
-					intensity={0.65}
-					distance={2}
-					decay={2}
-				/>
-			)}
-			<Component progress={progress} />
-		</group>
+		<div className="pointer-events-none absolute inset-0 z-20">
+			<div className="pointer-events-auto absolute right-5 top-24 w-[min(340px,calc(100vw-40px))] border border-white/12 bg-black/48 px-4 py-3 text-white shadow-2xl backdrop-blur-md md:right-8 md:top-28">
+				<div className="flex items-start justify-between gap-4">
+					<div>
+						<p className="font-serif text-lg leading-tight text-white/95">
+							{selected.name}
+						</p>
+						<p className="mt-2 text-sm leading-snug text-white/78">
+							{selected.text}
+						</p>
+					</div>
+					<button
+						type="button"
+						aria-label="Close caption"
+						className="grid h-7 w-7 shrink-0 place-items-center border border-white/15 text-white/65 transition hover:border-white/35 hover:text-white"
+						onClick={onClose}
+					>
+						×
+					</button>
+				</div>
+			</div>
+		</div>
 	);
 }
 
-function GalleryScene({ speed = 1, zSpacing = 6 }: RelicGalleryProps) {
+function GalleryScene({
+	speed = 1,
+	zSpacing = 6,
+	selected,
+	onSelect,
+}: RelicGalleryProps & {
+	selected: ArtifactMeta | null;
+	onSelect: (artifact: ArtifactMeta) => void;
+}) {
 	const velocity = useRef(0);
 	const autoPlay = useRef(true);
 	const lastInteraction = useRef(Date.now());
-	const { camera } = useThree();
+	const { camera, gl } = useThree();
 
-	const count = RELICS.length;
+	const count = ARTIFACTS.length;
 
-	// Lateral / vertical offsets give the tunnel a wandering feel.
+	// Fixed offsets keep the five symbolic artifacts in a deliberate procession.
 	const offsets = useMemo(
 		() =>
 			Array.from({ length: count }, (_, i) => {
-				const ha = i * 2.399;
-				const va = i * 1.618 + 1.2;
-				// Strong scale variation: some relics loom close, others recede.
-				const scale = 0.6 + (Math.sin(i * 3.17) * 0.5 + 0.5) * 0.9;
+				const procession = [
+					{ x: 0, y: 0.42, scale: 1.08 },
+					{ x: -1.05, y: -0.04, scale: 0.92 },
+					{ x: 1.05, y: 0.1, scale: 0.98 },
+					{ x: 0, y: -0.52, scale: 0.96 },
+					{ x: 0.68, y: 0.72, scale: 0.86 },
+				];
+				const p = procession[i % procession.length];
 				return {
-					x: Math.sin(ha) * 2.1,
-					y: Math.cos(va) * 1.4,
+					x: p.x,
+					y: p.y,
 					spin: (i / count) * Math.PI * 2,
-					spinSpeed: 0.12 + (i % 5) * 0.035,
+					spinSpeed: 0.075 + (i % 5) * 0.018,
 					wobblePhase: i * 1.37,
-					scale,
+					scale: p.scale,
 				};
 			}),
 		[count]
@@ -866,8 +821,8 @@ function GalleryScene({ speed = 1, zSpacing = 6 }: RelicGalleryProps) {
 	const slots = useRef<Slot[]>(
 		Array.from({ length: count }, (_, i) => ({
 			id: i,
-			relicIndex: i,
-			z: FAR + i * zSpacing,
+			artifactIndex: i,
+			z: -24 - i * zSpacing,
 			x: offsets[i].x,
 			y: offsets[i].y,
 			spin: offsets[i].spin,
@@ -878,6 +833,18 @@ function GalleryScene({ speed = 1, zSpacing = 6 }: RelicGalleryProps) {
 	);
 
 	const totalDepth = count * zSpacing;
+
+	useEffect(() => {
+		const canvas = gl.domElement;
+		const handleCanvasClick = () => {
+			const dominant = slots.current
+				.filter((slot) => slot.z > FAR + 8 && slot.z < NEAR - 1)
+				.sort((a, b) => b.z - a.z)[0];
+			if (dominant) onSelect(ARTIFACTS[dominant.artifactIndex]);
+		};
+		canvas.addEventListener('click', handleCanvasClick);
+		return () => canvas.removeEventListener('click', handleCanvasClick);
+	}, [gl, onSelect]);
 
 	const handleWheel = useCallback(
 		(e: WheelEvent) => {
@@ -1008,13 +975,13 @@ function GalleryScene({ speed = 1, zSpacing = 6 }: RelicGalleryProps) {
 				color={'#6d5136'}
 			/>
 
-			{slots.current.map((slot) => (
-				<RelicSlot
-					key={slot.id}
-					slot={slot}
-					Component={RELICS[slot.relicIndex].Component}
-				/>
-			))}
+			<FinalArtifacts
+				slots={slots.current}
+				selected={selected}
+				onSelect={onSelect}
+				far={FAR}
+				near={NEAR}
+			/>
 
 			<EffectComposer>
 				<Bloom
@@ -1023,6 +990,7 @@ function GalleryScene({ speed = 1, zSpacing = 6 }: RelicGalleryProps) {
 					luminanceSmoothing={0.08}
 					mipmapBlur
 				/>
+				<Noise opacity={0.025} />
 				<Vignette eskil={false} offset={0.15} darkness={0.58} />
 			</EffectComposer>
 		</>
@@ -1036,6 +1004,7 @@ export default function RelicGallery({
 	style,
 }: RelicGalleryProps) {
 	const [webgl, setWebgl] = useState(true);
+	const [selected, setSelected] = useState<ArtifactMeta | null>(null);
 
 	useEffect(() => {
 		try {
@@ -1053,16 +1022,18 @@ export default function RelicGallery({
 				className={className}
 				style={style}
 				role="img"
-				aria-label="A procession of sacred relics drifting through darkness"
+				aria-label="A procession of five symbolic artifacts drifting through a dark cathedral"
 			/>
 		);
 	}
 
 	return (
 		<div className={className} style={style}>
+			<div className="artifact-procession-canvas relative h-full w-full">
 			<Canvas
 				shadows
 				camera={{ position: [0, 0, 0], fov: 55 }}
+				style={{ width: '100%', height: '100%' }}
 				gl={{
 					antialias: true,
 					alpha: false,
@@ -1077,8 +1048,15 @@ export default function RelicGallery({
 				}}
 				dpr={[1, 1.5]}
 			>
-				<GalleryScene speed={speed} zSpacing={zSpacing} />
+				<GalleryScene
+					speed={speed}
+					zSpacing={zSpacing}
+					selected={selected}
+					onSelect={setSelected}
+				/>
 			</Canvas>
+			<CaptionPanel selected={selected} onClose={() => setSelected(null)} />
+			</div>
 		</div>
 	);
 }

@@ -5,7 +5,7 @@ export default function Home() {
 		<main className="min-h-screen bg-background">
 			<RelicGallery
 				speed={1.2}
-				zSpacing={6}
+				zSpacing={18}
 				className="h-screen w-full overflow-hidden"
 			/>
 			<div className="fixed top-6 left-6 md:top-8 md:left-8 pointer-events-none z-10">
